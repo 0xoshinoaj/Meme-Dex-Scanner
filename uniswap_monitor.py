@@ -25,71 +25,7 @@ w3 = Web3(Web3.WebsocketProvider(WS_URL))
 # WETH 地址（以太坊主網）
 WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
 
-# ERC20 代幣 ABI（僅包含 name 函數）
-ERC20_ABI = [
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "name",
-        "outputs": [{"name": "", "type": "string"}],
-        "type": "function"
-    }
-]
-
-def get_token_name(address):
-    try:
-        token_contract = w3.eth.contract(address=address, abi=ERC20_ABI)
-        return token_contract.functions.name().call()
-    except Exception as e:
-        print(f"Error getting token name: {e}")
-        return "Unknown Token"
-
-def handle_event(event):
-    if event['address'].lower() == UNISWAP_V2_FACTORY.lower():
-        token0 = '0x' + event['topics'][1][26:]
-        token1 = '0x' + event['topics'][2][26:]
-        pair = '0x' + event['data'][26:66]
-        
-        # 確定哪個是代幣，哪個是 ETH/WETH
-        if token1.lower() == WETH_ADDRESS.lower():
-            token_address = token0
-        elif token0.lower() == WETH_ADDRESS.lower():
-            token_address = token1
-        else:
-            # 如果兩個都不是 WETH，我們假設 token0 是主要代幣
-            token_address = token0
-        
-        token_name = get_token_name(token_address)
-        
-        print(f"New Uniswap V2 Pair Created: {pair}")
-        print(f"代幣名稱：{token_name}")
-        print(f"代幣合約：{token_address}")
-    
-    elif event['address'].lower() == UNISWAP_V3_FACTORY.lower():
-        token0 = '0x' + event['topics'][1][26:]
-        token1 = '0x' + event['topics'][2][26:]
-        fee = int(event['topics'][3], 16)
-        pool = '0x' + event['data'][26:66]
-        
-        # 確定哪個是代幣，哪個是 ETH/WETH
-        if token1.lower() == WETH_ADDRESS.lower():
-            token_address = token0
-        elif token0.lower() == WETH_ADDRESS.lower():
-            token_address = token1
-        else:
-            # 如果兩個都不是 WETH，我們假設 token0 是主要代幣
-            token_address = token0
-        
-        token_name = get_token_name(token_address)
-        
-        print(f"New Uniswap V3 Pool Created: {pool}")
-        print(f"代幣名稱：{token_name}")
-        print(f"代幣合約：{token_address}")
-        print(f"Fee: {fee}")
-    
-    print("---")
-
-async def subscribe_to_events():
+async def monitor_uniswap(callback):
     async with websockets.connect(WS_URL) as ws:
         subscribe_message = {
             "id": 1,
@@ -107,13 +43,20 @@ async def subscribe_to_events():
             try:
                 message = await ws.recv()
                 event = json.loads(message)['params']['result']
-                handle_event(event)
+                await callback(event)
             except Exception as e:
                 print(f"Error: {e}")
 
-async def main():
-    print("Starting to monitor Uniswap V2 and V3 for new pairs/pools...")
-    await subscribe_to_events()
-
-if __name__ == '__main__':
-    asyncio.run(main())
+def parse_event(event):
+    if event['address'].lower() == UNISWAP_V2_FACTORY.lower():
+        token0 = '0x' + event['topics'][1][26:]
+        token1 = '0x' + event['topics'][2][26:]
+        pair = '0x' + event['data'][26:66]
+        return 'V2', token0, token1, pair
+    elif event['address'].lower() == UNISWAP_V3_FACTORY.lower():
+        token0 = '0x' + event['topics'][1][26:]
+        token1 = '0x' + event['topics'][2][26:]
+        fee = int(event['topics'][3], 16)
+        pool = '0x' + event['data'][26:66]
+        return 'V3', token0, token1, pool, fee
+    return None
